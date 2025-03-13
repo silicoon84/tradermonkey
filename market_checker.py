@@ -69,7 +69,7 @@ def fetch_market_sentiment():
             return "⚠ No recent financial headlines found"
         prompt = f"Summarize these financial headlines in simple terms:\n{headlines}"
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
         )
         return response.choices[0].message.content
