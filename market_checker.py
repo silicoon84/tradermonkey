@@ -79,8 +79,8 @@ def fetch_market_sentiment():
 def generate_key_takeaways(market_summary, sentiment):
     """Use LLM to generate key takeaways from market data and sentiment."""
     prompt = f"""
-    Based on the market trends and sentiment analysis, generate key takeaways and investment insights. This should be general insights not specific to any stock.
-
+    Based on the market trends and sentiment analysis, generate key takeaways and investment insights.
+    Do not generate anything related to sentiment on specific companies or stocks.
     Market Summary:
     {market_summary}
 
