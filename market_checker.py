@@ -68,9 +68,9 @@ def fetch_market_sentiment():
         headlines = [article["title"] for article in news_data.get("articles", [])[:5]]
         if not headlines:
             return "⚠ No recent financial headlines found"
-        prompt = f"Summarize these financial headlines in simple terms:\n{headlines}"
+        prompt = f"Summarize these financial headlines:\n{headlines}"
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
         )
         return response.choices[0].message.content
@@ -191,13 +191,13 @@ def send_telegram_photo(photo_path):
 if __name__ == "__main__":
     # Fetch market data and sentiment
     market_data = fetch_market_data()
-    sentiment = fetch_market_sentiment()  # used for key takeaways but not displayed
+    sentiment = fetch_market_sentiment()
     key_takeaways = generate_key_takeaways(market_data, sentiment)
 
     # Send market overview and key takeaways as separate messages
     send_telegram_message(f"📊 *Market Overview (50, 100, 150-Day MA)*\n\n{market_data}")
     send_telegram_message(f"💡 *Key Takeaways:*\n{key_takeaways}")
-
+    send_telegram_message(f"{sentiment}")
     # Generate and send graphs for S&P 500, NASDAQ, and ASX 200
     for symbol, name in [(SP500_SYMBOL, "S&P 500"), (NASDAQ_SYMBOL, "NASDAQ"), (ASX200_SYMBOL, "ASX 200"), (GOLD_SYMBOL, "Gold")]:
         graph_path = generate_market_graph(symbol, name)
