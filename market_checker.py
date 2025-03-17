@@ -23,6 +23,7 @@ client = openai.OpenAI(api_key=OPENAI_API_KEY)
 SP500_SYMBOL = "^GSPC"
 NASDAQ_SYMBOL = "^IXIC"
 ASX200_SYMBOL = "^AXJO"
+GOLD_SYMBOL = "GC=F"
 MARKETS = {
     "S&P 500": SP500_SYMBOL,
     "NASDAQ": NASDAQ_SYMBOL,
@@ -197,7 +198,7 @@ if __name__ == "__main__":
     send_telegram_message(f"💡 *Key Takeaways:*\n{key_takeaways}")
 
     # Generate and send graphs for S&P 500, NASDAQ, and ASX 200
-    for symbol, name in [(SP500_SYMBOL, "S&P 500"), (NASDAQ_SYMBOL, "NASDAQ"), (ASX200_SYMBOL, "ASX 200")]:
+    for symbol, name in [(SP500_SYMBOL, "S&P 500"), (NASDAQ_SYMBOL, "NASDAQ"), (ASX200_SYMBOL, "ASX 200"), (GOLD_SYMBOL, "Gold")]:
         graph_path = generate_market_graph(symbol, name)
         if graph_path:
             send_telegram_photo(graph_path)
