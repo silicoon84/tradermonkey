@@ -98,7 +98,7 @@ def generate_key_takeaways(market_summary, sentiment):
     return response.choices[0].message.content
 
 def fetch_market_data():
-    """Fetch market data with 50/100/150-day MAs, RSI, and MACD."""
+    """Fetch market data with 50/100/125-day MAs, RSI, and MACD."""
     market_summary = ""
     for name, symbol in MARKETS.items():
         ticker = yf.Ticker(symbol)
@@ -107,21 +107,21 @@ def fetch_market_data():
             latest_close = hist["Close"].iloc[-1]
             ma50 = hist["Close"].rolling(window=50).mean().iloc[-1]
             ma100 = hist["Close"].rolling(window=100).mean().iloc[-1]
-            ma150 = hist["Close"].rolling(window=150).mean().iloc[-1]
+            ma125 = hist["Close"].rolling(window=125).mean().iloc[-1]
             ma50_signal = "🟢" if latest_close > ma50 else "🔴"
             ma100_signal = "🟢" if latest_close > ma100 else "🔴"
-            ma150_signal = "🟢" if latest_close > ma150 else "🔴"
+            ma125_signal = "🟢" if latest_close > ma125 else "🔴"
             macd_signal = calculate_macd(hist)
             rsi_signal = calculate_rsi(hist)
             trend_emoji = "🟢" if latest_close > ma50 else "🔴"
             trend_status = (
-                "📈 Strong Uptrend (Above MA50, MA100, MA150)" if latest_close > ma50 > ma100 > ma150 else
-                "📉 Bearish Trend (Below MA50, MA100, MA150)" if latest_close < ma50 < ma100 < ma150 else
+                "📈 Strong Uptrend (Above MA50, MA100, MA125)" if latest_close > ma50 > ma100 > ma125 else
+                "📉 Bearish Trend (Below MA50, MA100, MA125)" if latest_close < ma50 < ma100 < ma125 else
                 "⚪ Mixed Signals (Market Unclear)"
             )
             market_summary += (
                 f"• *{name}:* {trend_emoji} {trend_status}\n"
-                f"  - {ma50_signal} MA50 | {ma100_signal} MA100 | {ma150_signal} MA150\n"
+                f"  - {ma50_signal} MA50 | {ma100_signal} MA100 | {ma125_signal} MA125\n"
                 f"  - {rsi_signal} | {macd_signal}\n\n"
             )
         else:
@@ -139,7 +139,7 @@ def generate_market_graph(symbol, market_name):
     # Compute moving averages
     hist["MA50"] = hist["Close"].rolling(window=50).mean()
     hist["MA100"] = hist["Close"].rolling(window=100).mean()
-    hist["MA150"] = hist["Close"].rolling(window=150).mean()
+    hist["MA125"] = hist["Close"].rolling(window=125).mean()
 
     # Calculate MACD and Signal line
     short_ema = hist["Close"].ewm(span=12, adjust=False).mean()
@@ -154,8 +154,8 @@ def generate_market_graph(symbol, market_name):
     ax1.plot(hist.index, hist["Close"], label=f"{market_name} Price", color="black", linewidth=2)
     ax1.plot(hist.index, hist["MA50"], label="50-Day MA", color="blue", linestyle="dashed")
     ax1.plot(hist.index, hist["MA100"], label="100-Day MA", color="green", linestyle="dashed")
-    ax1.plot(hist.index, hist["MA150"], label="150-Day MA", color="red", linestyle="dashed")
-    ax1.set_title(f"{market_name} - Last 150 Days with MAs")
+    ax1.plot(hist.index, hist["MA125"], label="125-Day MA", color="red", linestyle="dashed")
+    ax1.set_title(f"{market_name} - Last 125 Days with MAs")
     ax1.set_ylabel("Price")
     ax1.legend()
     ax1.grid(True)
@@ -195,7 +195,7 @@ if __name__ == "__main__":
     key_takeaways = generate_key_takeaways(market_data, sentiment)
 
     # Send market overview and key takeaways as separate messages
-    send_telegram_message(f"📊 *Market Overview (50, 100, 150-Day MA)*\n\n{market_data}")
+    send_telegram_message(f"📊 *Market Overview (50, 100, 125-Day MA)*\n\n{market_data}")
     send_telegram_message(f"💡 *Key Takeaways:*\n{key_takeaways}")
     send_telegram_message(f" *News Overview*\n{sentiment}")
     # Generate and send graphs for S&P 500, NASDAQ, and ASX 200
