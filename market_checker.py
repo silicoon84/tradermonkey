@@ -197,7 +197,7 @@ if __name__ == "__main__":
     # Send market overview and key takeaways as separate messages
     send_telegram_message(f"📊 *Market Overview (50, 100, 150-Day MA)*\n\n{market_data}")
     send_telegram_message(f"💡 *Key Takeaways:*\n{key_takeaways}")
-    send_telegram_message(f"{sentiment}")
+    send_telegram_message(f" *News Overview*\n{sentiment}")
     # Generate and send graphs for S&P 500, NASDAQ, and ASX 200
     for symbol, name in [(SP500_SYMBOL, "S&P 500"), (NASDAQ_SYMBOL, "NASDAQ"), (ASX200_SYMBOL, "ASX 200"), (GOLD_SYMBOL, "Gold")]:
         graph_path = generate_market_graph(symbol, name)
