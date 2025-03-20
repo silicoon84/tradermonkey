@@ -78,22 +78,64 @@ def fetch_market_sentiment():
     except Exception:
         return "⚠ Unable to retrieve market news"
 
+def load_market_memory():
+    """Load previous market data from memory file."""
+    try:
+        if os.path.exists('market_memory.json'):
+            with open('market_memory.json', 'r') as f:
+                return json.load(f)
+        return {'history': []}
+    except Exception as e:
+        print(f"Error loading market memory: {str(e)}")
+        return {'history': []}
+
+def save_market_memory(market_data, sentiment, key_takeaways):
+    """Save current market data to memory file."""
+    try:
+        memory = load_market_memory()
+        current_data = {
+            'timestamp': datetime.now().isoformat(),
+            'market_data': market_data,
+            'sentiment': sentiment,
+            'key_takeaways': key_takeaways
+        }
+        memory['history'].append(current_data)
+        # Keep only last 7 days of history
+        memory['history'] = memory['history'][-7:]
+        with open('market_memory.json', 'w') as f:
+            json.dump(memory, f, indent=2)
+    except Exception as e:
+        print(f"Error saving market memory: {str(e)}")
+
 def generate_key_takeaways(market_summary, sentiment):
     """Use LLM to generate key takeaways from market data and sentiment."""
+    # Load historical context
+    memory = load_market_memory()
+    historical_context = ""
+    
+    if memory['history']:
+        historical_context = "\nHistorical Context (Last 7 Days):\n"
+        for day in memory['history'][-3:]:  # Use last 3 days for context
+            historical_context += f"\nDate: {day['timestamp']}\n"
+            historical_context += f"Previous Takeaways: {day['key_takeaways']}\n"
+    
     prompt = f"""
-    Based on the market trends and sentiment analysis, generate key takeaways and investment insights. 
+    Based on the market trends, sentiment analysis, and historical context, generate key takeaways and investment insights. 
     Your aim is to provide recommendations on when to buy back into the market, given recent volatility.
     Do not generate anything related to sentiment on specific companies or stocks.
-    Market Summary:
+    
+    Current Market Summary:
     {market_summary}
 
-    Market Sentiment:
+    Current Market Sentiment:
     {sentiment}
+    
+    {historical_context}
 
-    Keep the response short and actionable.
+    Keep the response short and actionable. Consider the historical context to provide more consistent insights.
     """
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
     )
     return response.choices[0].message.content
@@ -228,6 +270,9 @@ if __name__ == "__main__":
     market_data = fetch_market_data()
     sentiment = fetch_market_sentiment()
     key_takeaways = generate_key_takeaways(market_data, sentiment)
+
+    # Save current data to memory
+    save_market_memory(market_data, sentiment, key_takeaways)
 
     # Send market overview and key takeaways as separate messages
     send_telegram_message(f"📊 *Market Overview (50, 100, 125-Day MA)*\n\n{market_data}")
