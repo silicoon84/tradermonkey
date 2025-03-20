@@ -110,7 +110,7 @@ def fetch_fear_and_greed_index():
         if response.status_code == 200:
             data = response.json()
             if data and 'fear_and_greed' in data:
-                score = data['fear_and_greed']['score']
+                score = round(float(data['fear_and_greed']['score']), 2)
                 rating = data['fear_and_greed']['rating']
                 
                 emoji = {
