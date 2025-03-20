@@ -101,13 +101,25 @@ def generate_key_takeaways(market_summary, sentiment):
 def fetch_fear_and_greed_index():
     """Fetch the CNN Fear & Greed Index."""
     try:
-        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+        # Using the alternative endpoint that's more reliable
+        url = "https://api.alternative.me/fng/"
         response = requests.get(url)
         if response.status_code == 200:
             data = response.json()
-            if data and 'fear_and_greed' in data:
-                score = data['fear_and_greed']['score']
-                rating = data['fear_and_greed']['rating']
+            if data and 'data' in data and len(data['data']) > 0:
+                score = int(data['data'][0]['value'])
+                # Convert score to rating
+                if score <= 25:
+                    rating = 'Extreme Fear'
+                elif score <= 45:
+                    rating = 'Fear'
+                elif score <= 55:
+                    rating = 'Neutral'
+                elif score <= 75:
+                    rating = 'Greed'
+                else:
+                    rating = 'Extreme Greed'
+                
                 emoji = {
                     'Extreme Fear': '😱',
                     'Fear': '😨',
@@ -115,9 +127,11 @@ def fetch_fear_and_greed_index():
                     'Greed': '😈',
                     'Extreme Greed': '🤪'
                 }.get(rating, '❓')
+                
                 return f"{emoji} Fear & Greed Index: {score} ({rating})"
         return "⚠ Unable to fetch Fear & Greed Index"
-    except Exception:
+    except Exception as e:
+        print(f"Error fetching Fear & Greed Index: {str(e)}")
         return "⚠ Error fetching Fear & Greed Index"
 
 def fetch_market_data():
