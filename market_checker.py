@@ -93,11 +93,20 @@ def save_market_memory(market_data, sentiment, key_takeaways):
     """Save current market data to memory file."""
     try:
         memory = load_market_memory()
+        
+        # Generate market history data
+        market_history = {}
+        for name, symbol in MARKETS.items():
+            history = fetch_market_history(symbol)
+            if history:
+                market_history[name] = history
+        
         current_data = {
             'timestamp': datetime.now().isoformat(),
             'market_data': market_data,
             'sentiment': sentiment,
-            'key_takeaways': key_takeaways
+            'key_takeaways': key_takeaways,
+            'market_history': market_history
         }
         memory['history'].append(current_data)
         # Keep only last 7 days of history
@@ -137,15 +146,32 @@ def fetch_market_history(symbol, days=50):
 
 def generate_market_history_summary():
     """Generate a summary of historical market data."""
+    # Load historical data from memory
+    memory = load_market_memory()
     history_summary = "\nMarket History (Last 50 Days):\n"
-    for name, symbol in MARKETS.items():
-        history = fetch_market_history(symbol)
-        if history:
+    
+    if memory['history']:
+        # Use the most recent market history data
+        latest_data = memory['history'][-1]
+        market_history = latest_data.get('market_history', {})
+        
+        for name, history in market_history.items():
             history_summary += f"\n{name}:\n"
             history_summary += f"- Price Movement: {history['start_price']} → {history['current_price']} ({history['total_return']}%)\n"
             history_summary += f"- Average Daily Return: {history['avg_daily_return']}%\n"
             history_summary += f"- Volatility: {history['volatility']}%\n"
             history_summary += f"- Up/Down Days: {history['positive_days']}/{history['negative_days']}\n"
+    else:
+        # If no memory data, fetch fresh data
+        for name, symbol in MARKETS.items():
+            history = fetch_market_history(symbol)
+            if history:
+                history_summary += f"\n{name}:\n"
+                history_summary += f"- Price Movement: {history['start_price']} → {history['current_price']} ({history['total_return']}%)\n"
+                history_summary += f"- Average Daily Return: {history['avg_daily_return']}%\n"
+                history_summary += f"- Volatility: {history['volatility']}%\n"
+                history_summary += f"- Up/Down Days: {history['positive_days']}/{history['negative_days']}\n"
+    
     return history_summary
 
 def generate_key_takeaways(market_summary, sentiment):
