@@ -123,16 +123,18 @@ def generate_key_takeaways(market_summary, sentiment):
     Based on the market trends, sentiment analysis, and historical context, generate key takeaways and investment insights. 
     Your aim is to provide recommendations on when to buy back into the market, given recent volatility.
     Do not generate anything related to sentiment on specific companies or stocks.
+    Previous Takeaways were provided by you, so try to show history and trends in your response.
     
-    Current Market Summary:
+    Current Market Summary Today:
     {market_summary}
 
-    Current Market Sentiment:
+    Current Market News Today:
     {sentiment}
     
+    Your Previous Takeaways:
     {historical_context}
 
-    Keep the response short and actionable. Consider the historical context to provide more consistent insights.
+    Keep the response short and actionable. Consider the historical context to provide more consistent insights. e.g. is the fear and greed index improving, or are markets moving higher.
     """
     response = client.chat.completions.create(
         model="gpt-4",
