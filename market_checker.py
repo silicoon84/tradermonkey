@@ -57,25 +57,78 @@ def calculate_rsi(data):
     return f"⚪ RSI {rsi_value:.1f} (Neutral)"
 
 def fetch_market_sentiment():
-    """Fetch financial news using NewsAPI and summarize sentiment using OpenAI."""
+    """Fetch financial news from multiple sources and summarize market-moving news using OpenAI."""
     if not NEWS_API_KEY:
         return "⚠ No NewsAPI key provided"
+    
     try:
-        url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWS_API_KEY}"
-        response = requests.get(url)
-        news_data = response.json()
-        if news_data.get("status") != "ok":
-            return "⚠ Error fetching news"
-        headlines = [article["title"] for article in news_data.get("articles", [])[:5]]
-        if not headlines:
-            return "⚠ No recent financial headlines found"
-        prompt = f"Summarize these financial headlines:\n{headlines}"
+        # Fetch from multiple sources
+        sources = [
+            "reuters",
+            "bloomberg",
+            "financial-times",
+            "the-wall-street-journal",
+            "cnbc"
+        ]
+        
+        all_headlines = []
+        for source in sources:
+            url = f"https://newsapi.org/v2/top-headlines?sources={source}&language=en&apiKey={NEWS_API_KEY}"
+            response = requests.get(url)
+            news_data = response.json()
+            
+            if news_data.get("status") == "ok":
+                articles = news_data.get("articles", [])
+                for article in articles:
+                    # Only include articles with market-related keywords
+                    title = article["title"].lower()
+                    keywords = ["market", "stocks", "economy", "fed", "inflation", "gdp", "trade", "dow", "s&p", "nasdaq"]
+                    if any(keyword in title for keyword in keywords):
+                        all_headlines.append({
+                            "title": article["title"],
+                            "source": source,
+                            "url": article["url"]
+                        })
+        
+        if not all_headlines:
+            return "⚠ No relevant market news found"
+        
+        # Format headlines for analysis
+        headlines_text = "\n".join([f"{h['title']} (Source: {h['source']})" for h in all_headlines])
+        
+        # Use GPT-4 to analyze and filter market-moving news
+        prompt = f"""
+        Analyze these financial headlines and identify only the market-moving news that could significantly impact markets.
+        Focus on major economic events, policy changes, and significant market movements.
+        Ignore minor market fluctuations and company-specific news unless they have broad market implications.
+        
+        Headlines:
+        {headlines_text}
+        
+        Provide a concise summary of only the most impactful market-moving news, organized by category:
+        1. Major Economic Events
+        2. Policy Changes
+        3. Significant Market Movements
+        4. Key Market Indicators
+        
+        Keep the summary focused and actionable, highlighting only news that could influence market direction.
+        """
+        
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
         )
-        return response.choices[0].message.content
-    except Exception:
+        
+        # Add source links to the summary
+        summary = response.choices[0].message.content
+        summary += "\n\nSources:\n"
+        for headline in all_headlines:
+            summary += f"- {headline['title']}: {headline['url']}\n"
+        
+        return summary
+        
+    except Exception as e:
+        print(f"Error fetching market sentiment: {str(e)}")
         return "⚠ Unable to retrieve market news"
 
 def load_market_memory():
