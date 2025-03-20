@@ -114,11 +114,11 @@ def fetch_fear_and_greed_index():
                 rating = data['fear_and_greed']['rating']
                 
                 emoji = {
-                    'Extreme Fear': '😱',
-                    'Fear': '😨',
+                    'Extreme Fear': '😨',
+                    'Fear': '😰',
                     'Neutral': '😐',
-                    'Greed': '😈',
-                    'Extreme Greed': '🤪'
+                    'Greed': '😊',
+                    'Extreme Greed': '😄'
                 }.get(rating, '❓')
                 
                 return f"{emoji} Fear & Greed Index: {score} ({rating})"
