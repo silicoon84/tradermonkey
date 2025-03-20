@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 from dotenv import load_dotenv
+import json
 
 # Load environment variables
 load_dotenv()
@@ -97,9 +98,36 @@ def generate_key_takeaways(market_summary, sentiment):
     )
     return response.choices[0].message.content
 
+def fetch_fear_and_greed_index():
+    """Fetch the CNN Fear & Greed Index."""
+    try:
+        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'fear_and_greed' in data:
+                score = data['fear_and_greed']['score']
+                rating = data['fear_and_greed']['rating']
+                emoji = {
+                    'Extreme Fear': '😱',
+                    'Fear': '😨',
+                    'Neutral': '😐',
+                    'Greed': '😈',
+                    'Extreme Greed': '🤪'
+                }.get(rating, '❓')
+                return f"{emoji} Fear & Greed Index: {score} ({rating})"
+        return "⚠ Unable to fetch Fear & Greed Index"
+    except Exception:
+        return "⚠ Error fetching Fear & Greed Index"
+
 def fetch_market_data():
     """Fetch market data with 50/100/125-day MAs, RSI, and MACD."""
     market_summary = ""
+    
+    # Add Fear & Greed Index at the top
+    fear_greed = fetch_fear_and_greed_index()
+    market_summary += f"*Market Sentiment:*\n{fear_greed}\n\n"
+    
     for name, symbol in MARKETS.items():
         ticker = yf.Ticker(symbol)
         hist = ticker.history(period="200d")
