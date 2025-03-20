@@ -107,6 +107,47 @@ def save_market_memory(market_data, sentiment, key_takeaways):
     except Exception as e:
         print(f"Error saving market memory: {str(e)}")
 
+def fetch_market_history(symbol, days=50):
+    """Fetch historical price data for a market."""
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=f"{days}d")
+        if not hist.empty:
+            # Calculate daily returns
+            hist['Daily_Return'] = hist['Close'].pct_change() * 100
+            # Calculate key metrics
+            total_return = ((hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100).round(2)
+            avg_daily_return = hist['Daily_Return'].mean().round(2)
+            volatility = hist['Daily_Return'].std().round(2)
+            positive_days = (hist['Daily_Return'] > 0).sum()
+            negative_days = (hist['Daily_Return'] < 0).sum()
+            
+            return {
+                'total_return': total_return,
+                'avg_daily_return': avg_daily_return,
+                'volatility': volatility,
+                'positive_days': int(positive_days),
+                'negative_days': int(negative_days),
+                'current_price': hist['Close'].iloc[-1].round(2),
+                'start_price': hist['Close'].iloc[0].round(2)
+            }
+    except Exception as e:
+        print(f"Error fetching history for {symbol}: {str(e)}")
+    return None
+
+def generate_market_history_summary():
+    """Generate a summary of historical market data."""
+    history_summary = "\nMarket History (Last 50 Days):\n"
+    for name, symbol in MARKETS.items():
+        history = fetch_market_history(symbol)
+        if history:
+            history_summary += f"\n{name}:\n"
+            history_summary += f"- Price Movement: {history['start_price']} → {history['current_price']} ({history['total_return']}%)\n"
+            history_summary += f"- Average Daily Return: {history['avg_daily_return']}%\n"
+            history_summary += f"- Volatility: {history['volatility']}%\n"
+            history_summary += f"- Up/Down Days: {history['positive_days']}/{history['negative_days']}\n"
+    return history_summary
+
 def generate_key_takeaways(market_summary, sentiment):
     """Use LLM to generate key takeaways from market data and sentiment."""
     # Load historical context
@@ -114,27 +155,36 @@ def generate_key_takeaways(market_summary, sentiment):
     historical_context = ""
     
     if memory['history']:
-        historical_context = "\nHistorical Context (Last 7 Days):\n"
+        historical_context = "\nAnalysis History (Last 7 Days):\n"
         for day in memory['history'][-3:]:  # Use last 3 days for context
             historical_context += f"\nDate: {day['timestamp']}\n"
             historical_context += f"Previous Takeaways: {day['key_takeaways']}\n"
     
+    # Add market history data
+    market_history = generate_market_history_summary()
+    
     prompt = f"""
-    Based on the market trends, sentiment analysis, and historical context, generate key takeaways and investment insights. 
+    Based on the market trends, sentiment analysis, historical context, and detailed market data, generate key takeaways and investment insights. 
     Your aim is to provide recommendations on when to buy back into the market, given recent volatility.
     Do not generate anything related to sentiment on specific companies or stocks.
-    Previous Takeaways were provided by you, so try to show history and trends in your response.
     
-    Current Market Summary Today:
+    Current Market Summary:
     {market_summary}
 
-    Current Market News Today:
+    Current Market Sentiment:
     {sentiment}
     
-    Your Previous Takeaways:
+    {market_history}
+    
     {historical_context}
 
-    Keep the response short and actionable. Consider the historical context to provide more consistent insights. e.g. is the fear and greed index improving, or are markets moving higher.
+    Please analyze:
+    1. Overall market direction based on price movements and volatility
+    2. Market sentiment shifts compared to previous days
+    3. Risk levels based on volatility metrics
+    4. Potential entry points considering both technical and sentiment data
+    
+    Keep the response actionable and data-driven, considering both historical price action and sentiment trends.
     """
     response = client.chat.completions.create(
         model="gpt-4",
