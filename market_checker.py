@@ -434,6 +434,14 @@ if __name__ == "__main__":
     logger.info("Generating key takeaways...")
     key_takeaways = generate_key_takeaways(market_data, sentiment)
     
+    # Output key takeaways to console and log
+    print("\n=== Key Takeaways ===")
+    print(key_takeaways)
+    print("===================\n")
+    logger.info("\n=== Key Takeaways ===")
+    logger.info(key_takeaways)
+    logger.info("===================\n")
+    
     logger.info("Saving market memory...")
     save_market_memory(market_data, sentiment, key_takeaways)
     
