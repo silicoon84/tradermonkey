@@ -10,6 +10,7 @@ import json
 import logging
 import pandas as pd
 import wbgapi as wb
+from fredapi import Fred
 
 # Set up logging
 logging.basicConfig(
@@ -30,9 +31,13 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+FRED_API_KEY = os.getenv("FRED_API_KEY")  # Add this to your .env file
 
 # OpenAI Client
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+# Initialize FRED API client
+fred = Fred(api_key=FRED_API_KEY)
 
 # Market Symbols
 SP500_SYMBOL = "^GSPC"
@@ -266,6 +271,15 @@ def generate_key_takeaways(market_summary, sentiment):
     # Add market history data
     market_history = generate_market_history_summary()
     
+    # Fetch leading indicators
+    leading_indicators = fetch_leading_indicators()
+    indicators_summary = ""
+    if leading_indicators:
+        indicators_summary = "\nLeading Economic Indicators:\n"
+        for indicator, data in leading_indicators.items():
+            change_emoji = "📈" if data['change'] > 0 else "📉"
+            indicators_summary += f"{change_emoji} {indicator}: {data['value']:.2f} ({data['change']:+.2f}%)\n"
+    
     prompt = f"""
     Based on the market trends, sentiment analysis, historical context, and detailed market data, generate key takeaways and investment insights. 
     Your aim is to provide recommendations on when to buy back into the market, given recent volatility.
@@ -280,6 +294,8 @@ def generate_key_takeaways(market_summary, sentiment):
     
     {market_history}
     
+    {indicators_summary}
+    
     {historical_context}
 
     Please provide your analysis in two parts:
@@ -292,6 +308,7 @@ def generate_key_takeaways(market_summary, sentiment):
     - Market Direction & Volatility (1-2 lines)
     - Sentiment & Risk (1-2 lines)
     - Entry Points (1-2 lines)
+    - Economic Indicators Impact (1-2 lines)
     
     Keep everything concise and actionable. Focus on the most important points only.
     """
@@ -455,25 +472,25 @@ def send_telegram_photo(photo_path):
         requests.post(url, files={"photo": photo}, data=data)
 
 def fetch_inflation_data():
-    """Fetch inflation data for US and Australia using World Bank API."""
+    """Fetch inflation data for US and Australia using FRED and ABS APIs."""
     try:
-        # World Bank API indicators for inflation
-        # FP.CPI.TOTL.ZG - Inflation, consumer prices (annual %)
-        us_data = wb.data.DataFrame('FP.CPI.TOTL.ZG', 'USA', time=range(2022, 2024))
-        aus_data = wb.data.DataFrame('FP.CPI.TOTL.ZG', 'AUS', time=range(2022, 2024))
+        # US CPI (Consumer Price Index) - Monthly data
+        us_cpi = fred.get_series('CPIAUCSL')
         
-        # Convert to pandas Series with proper dates
-        us_inflation = pd.Series(us_data.iloc[:, 0].values, 
-                               index=pd.date_range(start='2022-01-01', periods=len(us_data), freq='YE'))
-        aus_inflation = pd.Series(aus_data.iloc[:, 0].values, 
-                                index=pd.date_range(start='2022-01-01', periods=len(aus_data), freq='YE'))
-        
-        # Interpolate to get monthly values
-        us_inflation = us_inflation.resample('ME').interpolate(method='linear')
-        aus_inflation = aus_inflation.resample('ME').interpolate(method='linear')
+        # Calculate US inflation rate (year-over-year change)
+        us_inflation = ((us_cpi - us_cpi.shift(12)) / us_cpi.shift(12)) * 100
         
         # Get last 24 months of data
         us_inflation = us_inflation.tail(24)
+        
+        # For Australia, we'll use the ABS CPI data
+        # ABS Series ID: A2325846C - All groups CPI: Index Numbers
+        aus_cpi = fred.get_series('A2325846C')
+        
+        # Calculate Australian inflation rate (year-over-year change)
+        aus_inflation = ((aus_cpi - aus_cpi.shift(12)) / aus_cpi.shift(12)) * 100
+        
+        # Get last 24 months of data
         aus_inflation = aus_inflation.tail(24)
         
         # Add some logging to debug the data
@@ -523,6 +540,52 @@ def generate_inflation_graph():
     plt.close()
     
     return graph_path
+
+def fetch_leading_indicators():
+    """Fetch leading economic indicators from FRED."""
+    try:
+        # Dictionary of important economic indicators and their descriptions
+        indicators = {
+            'VIXCLS': 'CBOE Volatility Index (VIX)',
+            'UMCSENT': 'Consumer Sentiment Index',
+            'M2SL': 'M2 Money Stock',
+            'INDPRO': 'Industrial Production Index',
+            'UNRATE': 'Unemployment Rate',
+            'FEDFUNDS': 'Federal Funds Rate',
+            'GS10': '10-Year Treasury Rate',
+            'BAA10Y': 'Moody\'s Seasoned Baa Corporate Bond Yield',
+            'HOUST': 'Housing Starts',
+            'RSXFS': 'Retail Sales',
+            'PCE': 'Personal Consumption Expenditures',
+            'GDP': 'Gross Domestic Product',
+            'CPIAUCSL': 'Consumer Price Index',
+            'PPIACO': 'Producer Price Index',
+            'MNFCTRIRSA': 'Manufacturing Production Index'
+        }
+        
+        indicator_data = {}
+        for series_id, description in indicators.items():
+            try:
+                data = fred.get_series(series_id)
+                # Get the latest value and calculate month-over-month change
+                latest_value = data.iloc[-1]
+                prev_value = data.iloc[-2]
+                change_pct = ((latest_value - prev_value) / prev_value) * 100
+                
+                indicator_data[description] = {
+                    'value': latest_value,
+                    'change': change_pct,
+                    'series_id': series_id
+                }
+            except Exception as e:
+                logger.error(f"Error fetching {series_id}: {str(e)}")
+                continue
+        
+        return indicator_data
+        
+    except Exception as e:
+        logger.error(f"Error fetching leading indicators: {str(e)}")
+        return None
 
 if __name__ == "__main__":
     logger.info("Starting market analysis...")
