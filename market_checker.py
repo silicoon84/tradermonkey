@@ -349,6 +349,13 @@ def fetch_market_data():
             ma50 = hist["Close"].rolling(window=50).mean().iloc[-1]
             ma100 = hist["Close"].rolling(window=100).mean().iloc[-1]
             ma125 = hist["Close"].rolling(window=125).mean().iloc[-1]
+            
+            # Calculate 100-day high/low percentages
+            hundred_day_high = hist["High"].max()
+            hundred_day_low = hist["Low"].min()
+            down_from_high = ((hundred_day_high - latest_close) / hundred_day_high) * 100
+            up_from_low = ((latest_close - hundred_day_low) / hundred_day_low) * 100
+            
             ma50_signal = "🟢" if latest_close > ma50 else "🔴"
             ma100_signal = "🟢" if latest_close > ma100 else "🔴"
             ma125_signal = "🟢" if latest_close > ma125 else "🔴"
@@ -363,7 +370,8 @@ def fetch_market_data():
             market_summary += (
                 f"• *{name}:* {trend_emoji} {trend_status}\n"
                 f"  - {ma50_signal} MA50 | {ma100_signal} MA100 | {ma125_signal} MA125\n"
-                f"  - {rsi_signal} | {macd_signal}\n\n"
+                f"  - {rsi_signal} | {macd_signal}\n"
+                f"  - 📉 Down {down_from_high:.1f}% from 100d high | 📈 Up {up_from_low:.1f}% from 100d low\n\n"
             )
         else:
             market_summary += f"• *{name}:* ⚠ No Data\n\n"
@@ -455,10 +463,10 @@ def fetch_inflation_data():
         aus_data = wb.data.DataFrame('FP.CPI.TOTL.ZG', 'AUS', time=range(2022, 2024))
         
         # Convert to pandas Series with proper dates
-        us_inflation = pd.Series(us_data.values.flatten(), 
-                               index=pd.date_range(start='2022-01-01', periods=len(us_data), freq='Y'))
-        aus_inflation = pd.Series(aus_data.values.flatten(), 
-                                index=pd.date_range(start='2022-01-01', periods=len(aus_data), freq='Y'))
+        us_inflation = pd.Series(us_data.iloc[:, 0].values, 
+                               index=pd.date_range(start='2022-01-01', periods=len(us_data), freq='YE'))
+        aus_inflation = pd.Series(aus_data.iloc[:, 0].values, 
+                                index=pd.date_range(start='2022-01-01', periods=len(aus_data), freq='YE'))
         
         # Interpolate to get monthly values
         us_inflation = us_inflation.resample('M').interpolate(method='linear')
