@@ -472,7 +472,7 @@ def send_telegram_photo(photo_path):
         requests.post(url, files={"photo": photo}, data=data)
 
 def fetch_inflation_data():
-    """Fetch inflation data for US and Australia using FRED API."""
+    """Fetch inflation data for US and Australia using FRED and World Bank APIs."""
     try:
         # US CPI (Consumer Price Index) - Monthly data
         # CPIAUCSL - Consumer Price Index for All Urban Consumers: All Items in U.S. City Average
@@ -484,12 +484,17 @@ def fetch_inflation_data():
         # Get last 24 months of data
         us_inflation = us_inflation.tail(24)
         
-        # For Australia, we'll use the Reserve Bank of Australia CPI data
-        # AUSCPI - Consumer Price Index: All Items for Australia
-        aus_cpi = fred.get_series('AUSCPI')
+        # For Australia, we'll use the World Bank API
+        # FP.CPI.TOTL.ZG - Inflation, consumer prices (annual %)
+        current_year = datetime.now().year
+        aus_data = wb.data.DataFrame('FP.CPI.TOTL.ZG', 'AUS', time=range(current_year-2, current_year+1))
         
-        # Calculate Australian inflation rate (year-over-year change)
-        aus_inflation = ((aus_cpi - aus_cpi.shift(12)) / aus_cpi.shift(12)) * 100
+        # Convert to pandas Series with proper dates
+        aus_inflation = pd.Series(aus_data.iloc[:, 0].values, 
+                                index=pd.date_range(start=f'{current_year-2}-01-01', periods=len(aus_data), freq='YE'))
+        
+        # Interpolate to get monthly values
+        aus_inflation = aus_inflation.resample('ME').interpolate(method='linear')
         
         # Get last 24 months of data
         aus_inflation = aus_inflation.tail(24)
@@ -512,9 +517,12 @@ def fetch_inflation_data():
             us_inflation = ((us_cpi - us_cpi.shift(12)) / us_cpi.shift(12)) * 100
             us_inflation = us_inflation.tail(24)
             
-            # Alternative Australian CPI series
-            aus_cpi = fred.get_series('AUSCPI')  # RBA CPI
-            aus_inflation = ((aus_cpi - aus_cpi.shift(12)) / aus_cpi.shift(12)) * 100
+            # For Australia, try alternative World Bank series
+            current_year = datetime.now().year
+            aus_data = wb.data.DataFrame('FP.CPI.TOTL', 'AUS', time=range(current_year-2, current_year+1))
+            aus_inflation = pd.Series(aus_data.iloc[:, 0].values, 
+                                    index=pd.date_range(start=f'{current_year-2}-01-01', periods=len(aus_data), freq='YE'))
+            aus_inflation = aus_inflation.resample('ME').interpolate(method='linear')
             aus_inflation = aus_inflation.tail(24)
             
             logger.info("Successfully fetched alternative inflation series")
