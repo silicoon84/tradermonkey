@@ -4,10 +4,12 @@ import yfinance as yf
 import requests
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import json
 import logging
+import pandas as pd
+from wbgapi import Data
 
 # Set up logging
 logging.basicConfig(
@@ -444,6 +446,70 @@ def send_telegram_photo(photo_path):
         data = {"chat_id": TELEGRAM_CHAT_ID}
         requests.post(url, files={"photo": photo}, data=data)
 
+def fetch_inflation_data():
+    """Fetch inflation data for US and Australia using World Bank API."""
+    try:
+        # World Bank API indicators for inflation
+        # FP.CPI.TOTL.ZG - Inflation, consumer prices (annual %)
+        us_inflation = Data('FP.CPI.TOTL.ZG', 'USA', time=range(2022, 2024)).df()
+        aus_inflation = Data('FP.CPI.TOTL.ZG', 'AUS', time=range(2022, 2024)).df()
+        
+        # Convert to pandas Series with proper dates
+        us_inflation = pd.Series(us_inflation['value'].values, 
+                               index=pd.date_range(start='2022-01-01', periods=len(us_inflation), freq='Y'))
+        aus_inflation = pd.Series(aus_inflation['value'].values, 
+                                index=pd.date_range(start='2022-01-01', periods=len(aus_inflation), freq='Y'))
+        
+        # Interpolate to get monthly values
+        us_inflation = us_inflation.resample('M').interpolate(method='linear')
+        aus_inflation = aus_inflation.resample('M').interpolate(method='linear')
+        
+        # Get last 24 months of data
+        us_inflation = us_inflation.tail(24)
+        aus_inflation = aus_inflation.tail(24)
+        
+        return us_inflation, aus_inflation
+        
+    except Exception as e:
+        logger.error(f"Error fetching inflation data: {str(e)}")
+        return None, None
+
+def generate_inflation_graph():
+    """Generate a graph showing US and Australian inflation rates."""
+    us_inflation, aus_inflation = fetch_inflation_data()
+    
+    if us_inflation is None or aus_inflation is None:
+        logger.error("Failed to generate inflation graph due to missing data")
+        return None
+    
+    plt.figure(figsize=(12, 6))
+    
+    # Plot US inflation
+    plt.plot(us_inflation.index, us_inflation.values, label='US Inflation', color='blue', linewidth=2)
+    
+    # Plot Australian inflation
+    plt.plot(aus_inflation.index, aus_inflation.values, label='Australian Inflation', color='red', linewidth=2)
+    
+    # Add target inflation lines
+    plt.axhline(y=2.0, color='green', linestyle='--', alpha=0.5, label='2% Target')
+    plt.axhline(y=3.0, color='orange', linestyle='--', alpha=0.5, label='3% Target')
+    
+    plt.title('US vs Australian Inflation Rates (24 Months)')
+    plt.xlabel('Date')
+    plt.ylabel('Inflation Rate (%)')
+    plt.legend()
+    plt.grid(True)
+    
+    # Rotate x-axis labels for better readability
+    plt.xticks(rotation=45)
+    
+    plt.tight_layout()
+    graph_path = 'inflation_comparison.png'
+    plt.savefig(graph_path)
+    plt.close()
+    
+    return graph_path
+
 if __name__ == "__main__":
     logger.info("Starting market analysis...")
     
@@ -488,5 +554,12 @@ if __name__ == "__main__":
         if graph_path:
             send_telegram_photo(graph_path)
             logger.info(f"Sent graph for {name}")
+    
+    # Generate and send inflation graph
+    logger.info("Generating and sending inflation graph...")
+    graph_path = generate_inflation_graph()
+    if graph_path:
+        send_telegram_photo(graph_path)
+        logger.info("Sent inflation graph")
     
     logger.info("Market analysis completed successfully")
