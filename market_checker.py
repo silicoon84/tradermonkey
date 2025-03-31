@@ -504,7 +504,7 @@ def fetch_abs_data(series_id, start_date):
         return None
 
 def fetch_inflation_data():
-    """Fetch inflation data for US and Australia using FRED and ABS APIs."""
+    """Fetch US inflation data using FRED API."""
     try:
         # US CPI (Consumer Price Index) - Monthly data
         # CPIAUCSL - Consumer Price Index for All Urban Consumers: All Items in U.S. City Average
@@ -516,27 +516,11 @@ def fetch_inflation_data():
         # Get last 24 months of data
         us_inflation = us_inflation.tail(24)
         
-        # For Australia, we'll use the ABS API
-        # Series ID: A2325846C - All groups CPI: Index Numbers
-        aus_data = fetch_abs_data('A2325846C', '2022-01-01')
-        
-        if aus_data is not None:
-            # Calculate Australian inflation rate (year-over-year change)
-            aus_inflation = ((aus_data - aus_data.shift(12)) / aus_data.shift(12)) * 100
-            
-            # Get last 24 months of data
-            aus_inflation = aus_inflation.tail(24)
-        else:
-            aus_inflation = None
-        
         # Add some logging to debug the data
         logger.info(f"US Inflation data points: {len(us_inflation)}")
         logger.info(f"US Inflation values: {us_inflation.values}")
-        if aus_inflation is not None:
-            logger.info(f"Australian Inflation data points: {len(aus_inflation)}")
-            logger.info(f"Australian Inflation values: {aus_inflation.values}")
         
-        return us_inflation, aus_inflation
+        return us_inflation
         
     except Exception as e:
         logger.error(f"Error fetching inflation data: {str(e)}")
@@ -548,28 +532,18 @@ def fetch_inflation_data():
             us_inflation = ((us_cpi - us_cpi.shift(12)) / us_cpi.shift(12)) * 100
             us_inflation = us_inflation.tail(24)
             
-            # For Australia, try alternative ABS series
-            # Series ID: A2325846F - All groups CPI: Index Numbers (Seasonally Adjusted)
-            aus_data = fetch_abs_data('A2325846F', '2022-01-01')
-            
-            if aus_data is not None:
-                aus_inflation = ((aus_data - aus_data.shift(12)) / aus_data.shift(12)) * 100
-                aus_inflation = aus_inflation.tail(24)
-            else:
-                aus_inflation = None
-            
             logger.info("Successfully fetched alternative inflation series")
-            return us_inflation, aus_inflation
+            return us_inflation
             
         except Exception as e2:
             logger.error(f"Error fetching alternative inflation data: {str(e2)}")
-            return None, None
+            return None
 
 def generate_inflation_graph():
-    """Generate a graph showing US and Australian inflation rates."""
-    us_inflation, aus_inflation = fetch_inflation_data()
+    """Generate a graph showing US inflation rate."""
+    us_inflation = fetch_inflation_data()
     
-    if us_inflation is None or aus_inflation is None:
+    if us_inflation is None:
         logger.error("Failed to generate inflation graph due to missing data")
         return None
     
@@ -578,14 +552,11 @@ def generate_inflation_graph():
     # Plot US inflation
     plt.plot(us_inflation.index, us_inflation.values, label='US Inflation', color='blue', linewidth=2, marker='o')
     
-    # Plot Australian inflation
-    plt.plot(aus_inflation.index, aus_inflation.values, label='Australian Inflation', color='red', linewidth=2, marker='o')
-    
     # Add target inflation lines
     plt.axhline(y=2.0, color='green', linestyle='--', alpha=0.5, label='2% Target')
     plt.axhline(y=3.0, color='orange', linestyle='--', alpha=0.5, label='3% Target')
     
-    plt.title('US vs Australian Inflation Rates (24 Months)')
+    plt.title('US Inflation Rate (24 Months)')
     plt.xlabel('Date')
     plt.ylabel('Inflation Rate (%)')
     plt.legend()
