@@ -282,17 +282,16 @@ def generate_key_takeaways(market_summary, sentiment):
 
     Please provide your analysis in two parts:
 
-    1. EXECUTIVE SUMMARY (2-3 sentences):
-    Start with a concise summary of your main recommendation and key market direction.
+    1. EXECUTIVE SUMMARY (1-2 sentences):
+    Start with a concise summary of your main recommendation and key market direction. Be brief but specific.
 
     2. DETAILED ANALYSIS:
-    Then provide a detailed analysis covering:
-    - Overall market direction based on price movements and volatility
-    - Market sentiment shifts compared to previous days
-    - Risk levels based on volatility metrics
-    - Potential entry points considering both technical and sentiment data
+    Then provide a concise analysis covering:
+    - Market Direction & Volatility (1-2 lines)
+    - Sentiment & Risk (1-2 lines)
+    - Entry Points (1-2 lines)
     
-    Keep the response actionable and data-driven, considering both historical price action and sentiment trends.
+    Keep everything concise and actionable. Focus on the most important points only.
     """
     
     logger.info("Generating key takeaways using GPT-4o-mini...")
@@ -452,10 +451,18 @@ if __name__ == "__main__":
     save_market_memory(market_data, sentiment, key_takeaways)
     
     logger.info("Sending Telegram messages...")
-    # Send market overview and key takeaways as separate messages
-    send_telegram_message(f"📊 *Market Overview (50, 100, 125-Day MA)*\n\n{market_data}")
+    # Split market data into smaller chunks if needed
+    market_data_chunks = [market_data[i:i+4000] for i in range(0, len(market_data), 4000)]
+    for chunk in market_data_chunks:
+        send_telegram_message(f"📊 *Market Overview*\n\n{chunk}")
+    
+    # Send key takeaways
     send_telegram_message(f"💡 *Key Takeaways:*\n{key_takeaways}")
-    send_telegram_message(f" *News Overview*\n{sentiment}")
+    
+    # Send sentiment in chunks if needed
+    sentiment_chunks = [sentiment[i:i+4000] for i in range(0, len(sentiment), 4000)]
+    for chunk in sentiment_chunks:
+        send_telegram_message(f"📰 *News Overview*\n{chunk}")
     
     # Generate and send graphs for S&P 500, NASDAQ, and ASX 200
     logger.info("Generating and sending market graphs...")
