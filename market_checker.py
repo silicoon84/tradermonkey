@@ -472,6 +472,38 @@ def send_telegram_photo(photo_path):
         data = {"chat_id": TELEGRAM_CHAT_ID}
         requests.post(url, files={"photo": photo}, data=data)
 
+def fetch_abs_data(series_id, start_date):
+    """Fetch data from ABS API."""
+    try:
+        # ABS API endpoint
+        url = f"https://api.data.abs.gov.au/data/{series_id}"
+        params = {
+            'startPeriod': start_date,
+            'format': 'json'
+        }
+        
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Extract values and dates
+        values = []
+        dates = []
+        for observation in data['data']['dataSets'][0]['series']['0']['observations']['0']:
+            values.append(float(observation))
+        
+        for observation in data['data']['dataSets'][0]['series']['0']['observations']['1']:
+            dates.append(observation)
+        
+        # Create pandas Series
+        series = pd.Series(values, index=pd.to_datetime(dates))
+        return series
+        
+    except Exception as e:
+        logger.error(f"Error fetching ABS data: {str(e)}")
+        return None
+
 def fetch_inflation_data():
     """Fetch inflation data for US and Australia using FRED and ABS APIs."""
     try:
@@ -487,19 +519,23 @@ def fetch_inflation_data():
         
         # For Australia, we'll use the ABS API
         # Series ID: A2325846C - All groups CPI: Index Numbers
-        aus_data = get_series('A2325846C', start_date='2022-01-01')
+        aus_data = fetch_abs_data('A2325846C', '2022-01-01')
         
-        # Calculate Australian inflation rate (year-over-year change)
-        aus_inflation = ((aus_data - aus_data.shift(12)) / aus_data.shift(12)) * 100
-        
-        # Get last 24 months of data
-        aus_inflation = aus_inflation.tail(24)
+        if aus_data is not None:
+            # Calculate Australian inflation rate (year-over-year change)
+            aus_inflation = ((aus_data - aus_data.shift(12)) / aus_data.shift(12)) * 100
+            
+            # Get last 24 months of data
+            aus_inflation = aus_inflation.tail(24)
+        else:
+            aus_inflation = None
         
         # Add some logging to debug the data
         logger.info(f"US Inflation data points: {len(us_inflation)}")
         logger.info(f"US Inflation values: {us_inflation.values}")
-        logger.info(f"Australian Inflation data points: {len(aus_inflation)}")
-        logger.info(f"Australian Inflation values: {aus_inflation.values}")
+        if aus_inflation is not None:
+            logger.info(f"Australian Inflation data points: {len(aus_inflation)}")
+            logger.info(f"Australian Inflation values: {aus_inflation.values}")
         
         return us_inflation, aus_inflation
         
@@ -515,9 +551,13 @@ def fetch_inflation_data():
             
             # For Australia, try alternative ABS series
             # Series ID: A2325846F - All groups CPI: Index Numbers (Seasonally Adjusted)
-            aus_data = get_series('A2325846F', start_date='2022-01-01')
-            aus_inflation = ((aus_data - aus_data.shift(12)) / aus_data.shift(12)) * 100
-            aus_inflation = aus_inflation.tail(24)
+            aus_data = fetch_abs_data('A2325846F', '2022-01-01')
+            
+            if aus_data is not None:
+                aus_inflation = ((aus_data - aus_data.shift(12)) / aus_data.shift(12)) * 100
+                aus_inflation = aus_inflation.tail(24)
+            else:
+                aus_inflation = None
             
             logger.info("Successfully fetched alternative inflation series")
             return us_inflation, aus_inflation
