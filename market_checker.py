@@ -368,7 +368,7 @@ def fetch_market_data():
     return market_summary.strip()
 
 def generate_market_graph(symbol, market_name):
-    """Generate a graph of the last 150 days with MA overlays and a MACD subplot."""
+    """Generate a graph of the last 150 days with MA overlays, MACD, and RSI subplots."""
     ticker = yf.Ticker(symbol)
     hist = ticker.history(period="150d")
     if hist.empty:
@@ -386,9 +386,17 @@ def generate_market_graph(symbol, market_name):
     macd_line = short_ema - long_ema
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
 
-    # Create figure with two subplots: top for price & MAs, bottom for MACD
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True,
-                                   gridspec_kw={'height_ratios': [3, 1]})
+    # Calculate RSI
+    delta = hist["Close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
+    # Create figure with three subplots: price & MAs, MACD, and RSI
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 12), sharex=True,
+                                       gridspec_kw={'height_ratios': [3, 1, 1]})
+    
     # Top plot: Price and MAs
     ax1.plot(hist.index, hist["Close"], label=f"{market_name} Price", color="black", linewidth=2)
     ax1.plot(hist.index, hist["MA50"], label="50-Day MA", color="blue", linestyle="dashed")
@@ -399,14 +407,23 @@ def generate_market_graph(symbol, market_name):
     ax1.legend()
     ax1.grid(True)
 
-    # Bottom plot: MACD
+    # Middle plot: MACD
     ax2.plot(hist.index, macd_line, label="MACD", color="magenta", linewidth=2)
     ax2.plot(hist.index, signal_line, label="Signal", color="orange", linestyle="dashed")
     ax2.set_title("MACD")
-    ax2.set_xlabel("Date")
     ax2.set_ylabel("Value")
     ax2.legend()
     ax2.grid(True)
+
+    # Bottom plot: RSI
+    ax3.plot(hist.index, rsi, label="RSI", color="purple", linewidth=2)
+    ax3.axhline(y=70, color='r', linestyle='--', alpha=0.5)
+    ax3.axhline(y=30, color='g', linestyle='--', alpha=0.5)
+    ax3.set_title("RSI")
+    ax3.set_xlabel("Date")
+    ax3.set_ylabel("Value")
+    ax3.legend()
+    ax3.grid(True)
 
     plt.tight_layout()
     graph_path = f"{market_name.lower().replace(' ', '_')}_chart.png"
