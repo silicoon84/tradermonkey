@@ -268,7 +268,7 @@ def generate_key_takeaways(market_summary, sentiment):
     Based on the market trends, sentiment analysis, historical context, and detailed market data, generate key takeaways and investment insights. 
     Your aim is to provide recommendations on when to buy back into the market, given recent volatility.
     Do not generate anything related to sentiment on specific companies or stocks.
-    The historical context you've been provided is what you've previously generated. If its the same as the previous day, just provide a concise summary of what you've previously said.
+    The historical context you've been provided is what you've previously generated. If its the same as the previous day or days, just provide a very concise summary of what you've previously said.
     
     Current Market Summary:
     {market_summary}
@@ -280,11 +280,17 @@ def generate_key_takeaways(market_summary, sentiment):
     
     {historical_context}
 
-    Please analyze:
-    1. Overall market direction based on price movements and volatility
-    2. Market sentiment shifts compared to previous days
-    3. Risk levels based on volatility metrics
-    4. Potential entry points considering both technical and sentiment data
+    Please provide your analysis in two parts:
+
+    1. EXECUTIVE SUMMARY (2-3 sentences):
+    Start with a concise summary of your main recommendation and key market direction.
+
+    2. DETAILED ANALYSIS:
+    Then provide a detailed analysis covering:
+    - Overall market direction based on price movements and volatility
+    - Market sentiment shifts compared to previous days
+    - Risk levels based on volatility metrics
+    - Potential entry points considering both technical and sentiment data
     
     Keep the response actionable and data-driven, considering both historical price action and sentiment trends.
     """
@@ -435,12 +441,12 @@ if __name__ == "__main__":
     key_takeaways = generate_key_takeaways(market_data, sentiment)
     
     # Output key takeaways to console and log
-    print("\n=== Key Takeaways ===")
+    print("\n=== Market Analysis ===")
     print(key_takeaways)
-    print("===================\n")
-    logger.info("\n=== Key Takeaways ===")
+    print("=====================\n")
+    logger.info("\n=== Market Analysis ===")
     logger.info(key_takeaways)
-    logger.info("===================\n")
+    logger.info("=====================\n")
     
     logger.info("Saving market memory...")
     save_market_memory(market_data, sentiment, key_takeaways)
