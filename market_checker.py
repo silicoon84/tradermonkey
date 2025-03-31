@@ -7,6 +7,18 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 from dotenv import load_dotenv
 import json
+import logging
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('market_checker.log')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -115,7 +127,7 @@ def fetch_market_sentiment():
         """
         
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
         )
         
@@ -136,10 +148,14 @@ def load_market_memory():
     try:
         if os.path.exists('market_memory.json'):
             with open('market_memory.json', 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                logger.info("Successfully loaded market memory")
+                logger.info(f"Number of historical entries: {len(data.get('history', []))}")
+                return data
+        logger.info("No market memory file found, creating new one")
         return {'history': []}
     except Exception as e:
-        print(f"Error loading market memory: {str(e)}")
+        logger.error(f"Error loading market memory: {str(e)}")
         return {'history': []}
 
 def save_market_memory(market_data, sentiment, key_takeaways):
@@ -166,8 +182,10 @@ def save_market_memory(market_data, sentiment, key_takeaways):
         memory['history'] = memory['history'][-7:]
         with open('market_memory.json', 'w') as f:
             json.dump(memory, f, indent=2)
+        logger.info("Successfully saved market memory")
+        logger.info(f"Current number of historical entries: {len(memory['history'])}")
     except Exception as e:
-        print(f"Error saving market memory: {str(e)}")
+        logger.error(f"Error saving market memory: {str(e)}")
 
 def fetch_market_history(symbol, days=50):
     """Fetch historical price data for a market."""
@@ -235,9 +253,13 @@ def generate_key_takeaways(market_summary, sentiment):
     
     if memory['history']:
         historical_context = "\nAnalysis History (Last 7 Days):\n"
+        logger.info("\n=== Historical Context ===")
         for day in memory['history'][-3:]:  # Use last 3 days for context
             historical_context += f"\nDate: {day['timestamp']}\n"
             historical_context += f"Previous Takeaways: {day['key_takeaways']}\n"
+            logger.info(f"\nDate: {day['timestamp']}")
+            logger.info(f"Previous Takeaways: {day['key_takeaways']}")
+        logger.info("=== End Historical Context ===\n")
     
     # Add market history data
     market_history = generate_market_history_summary()
@@ -246,6 +268,7 @@ def generate_key_takeaways(market_summary, sentiment):
     Based on the market trends, sentiment analysis, historical context, and detailed market data, generate key takeaways and investment insights. 
     Your aim is to provide recommendations on when to buy back into the market, given recent volatility.
     Do not generate anything related to sentiment on specific companies or stocks.
+    The historical context you've been provided is what you've previously generated. If its the same as the previous day, just provide a concise summary of what you've previously said.
     
     Current Market Summary:
     {market_summary}
@@ -265,10 +288,13 @@ def generate_key_takeaways(market_summary, sentiment):
     
     Keep the response actionable and data-driven, considering both historical price action and sentiment trends.
     """
+    
+    logger.info("Generating key takeaways using GPT-4o-mini...")
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
     )
+    logger.info("Successfully generated key takeaways")
     return response.choices[0].message.content
 
 def fetch_fear_and_greed_index():
@@ -397,20 +423,32 @@ def send_telegram_photo(photo_path):
         requests.post(url, files={"photo": photo}, data=data)
 
 if __name__ == "__main__":
+    logger.info("Starting market analysis...")
+    
     # Fetch market data and sentiment
+    logger.info("Fetching market data...")
     market_data = fetch_market_data()
+    logger.info("Fetching market sentiment...")
     sentiment = fetch_market_sentiment()
+    
+    logger.info("Generating key takeaways...")
     key_takeaways = generate_key_takeaways(market_data, sentiment)
-
-    # Save current data to memory
+    
+    logger.info("Saving market memory...")
     save_market_memory(market_data, sentiment, key_takeaways)
-
+    
+    logger.info("Sending Telegram messages...")
     # Send market overview and key takeaways as separate messages
     send_telegram_message(f"📊 *Market Overview (50, 100, 125-Day MA)*\n\n{market_data}")
     send_telegram_message(f"💡 *Key Takeaways:*\n{key_takeaways}")
     send_telegram_message(f" *News Overview*\n{sentiment}")
+    
     # Generate and send graphs for S&P 500, NASDAQ, and ASX 200
+    logger.info("Generating and sending market graphs...")
     for symbol, name in [(SP500_SYMBOL, "S&P 500"), (NASDAQ_SYMBOL, "NASDAQ"), (ASX200_SYMBOL, "ASX 200"), (GOLD_SYMBOL, "Gold")]:
         graph_path = generate_market_graph(symbol, name)
         if graph_path:
             send_telegram_photo(graph_path)
+            logger.info(f"Sent graph for {name}")
+    
+    logger.info("Market analysis completed successfully")
