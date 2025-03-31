@@ -472,9 +472,10 @@ def send_telegram_photo(photo_path):
         requests.post(url, files={"photo": photo}, data=data)
 
 def fetch_inflation_data():
-    """Fetch inflation data for US and Australia using FRED and ABS APIs."""
+    """Fetch inflation data for US and Australia using FRED API."""
     try:
         # US CPI (Consumer Price Index) - Monthly data
+        # CPIAUCSL - Consumer Price Index for All Urban Consumers: All Items in U.S. City Average
         us_cpi = fred.get_series('CPIAUCSL')
         
         # Calculate US inflation rate (year-over-year change)
@@ -483,9 +484,9 @@ def fetch_inflation_data():
         # Get last 24 months of data
         us_inflation = us_inflation.tail(24)
         
-        # For Australia, we'll use the ABS CPI data
-        # ABS Series ID: A2325846C - All groups CPI: Index Numbers
-        aus_cpi = fred.get_series('A2325846C')
+        # For Australia, we'll use the Reserve Bank of Australia CPI data
+        # AUSCPI - Consumer Price Index: All Items for Australia
+        aus_cpi = fred.get_series('AUSCPI')
         
         # Calculate Australian inflation rate (year-over-year change)
         aus_inflation = ((aus_cpi - aus_cpi.shift(12)) / aus_cpi.shift(12)) * 100
@@ -503,7 +504,25 @@ def fetch_inflation_data():
         
     except Exception as e:
         logger.error(f"Error fetching inflation data: {str(e)}")
-        return None, None
+        # Try alternative series if primary fails
+        try:
+            logger.info("Attempting to fetch alternative inflation series...")
+            # Alternative US CPI series
+            us_cpi = fred.get_series('CPILFESL')  # Core CPI (excluding food and energy)
+            us_inflation = ((us_cpi - us_cpi.shift(12)) / us_cpi.shift(12)) * 100
+            us_inflation = us_inflation.tail(24)
+            
+            # Alternative Australian CPI series
+            aus_cpi = fred.get_series('AUSCPI')  # RBA CPI
+            aus_inflation = ((aus_cpi - aus_cpi.shift(12)) / aus_cpi.shift(12)) * 100
+            aus_inflation = aus_inflation.tail(24)
+            
+            logger.info("Successfully fetched alternative inflation series")
+            return us_inflation, aus_inflation
+            
+        except Exception as e2:
+            logger.error(f"Error fetching alternative inflation data: {str(e2)}")
+            return None, None
 
 def generate_inflation_graph():
     """Generate a graph showing US and Australian inflation rates."""
