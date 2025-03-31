@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import json
 import logging
 import pandas as pd
-from wbgapi import Data
+import wbgapi as wb
 
 # Set up logging
 logging.basicConfig(
@@ -451,14 +451,14 @@ def fetch_inflation_data():
     try:
         # World Bank API indicators for inflation
         # FP.CPI.TOTL.ZG - Inflation, consumer prices (annual %)
-        us_inflation = Data('FP.CPI.TOTL.ZG', 'USA', time=range(2022, 2024)).df()
-        aus_inflation = Data('FP.CPI.TOTL.ZG', 'AUS', time=range(2022, 2024)).df()
+        us_data = wb.data.DataFrame('FP.CPI.TOTL.ZG', 'USA', time=range(2022, 2024))
+        aus_data = wb.data.DataFrame('FP.CPI.TOTL.ZG', 'AUS', time=range(2022, 2024))
         
         # Convert to pandas Series with proper dates
-        us_inflation = pd.Series(us_inflation['value'].values, 
-                               index=pd.date_range(start='2022-01-01', periods=len(us_inflation), freq='Y'))
-        aus_inflation = pd.Series(aus_inflation['value'].values, 
-                                index=pd.date_range(start='2022-01-01', periods=len(aus_inflation), freq='Y'))
+        us_inflation = pd.Series(us_data.values.flatten(), 
+                               index=pd.date_range(start='2022-01-01', periods=len(us_data), freq='Y'))
+        aus_inflation = pd.Series(aus_data.values.flatten(), 
+                                index=pd.date_range(start='2022-01-01', periods=len(aus_data), freq='Y'))
         
         # Interpolate to get monthly values
         us_inflation = us_inflation.resample('M').interpolate(method='linear')
