@@ -47,12 +47,12 @@ fred = Fred(api_key=FRED_API_KEY)
 
 # Market Symbols with Alpha Vantage symbols
 MARKETS = {
-    "S&P 500": {"yahoo": "^GSPC", "alpha_vantage": "SPY"},
-    "NASDAQ": {"yahoo": "^IXIC", "alpha_vantage": "QQQ"},
-    "Dow Jones": {"yahoo": "^DJI", "alpha_vantage": "DIA"},
-    "ASX 200": {"yahoo": "^AXJO", "alpha_vantage": "EWA"},  # Using iShares MSCI Australia ETF as proxy
-    "Gold": {"yahoo": "GC=F", "alpha_vantage": "GLD"},  # Using GLD ETF as proxy
-    "US 10-Yr Bond Yield": {"yahoo": "^TNX", "alpha_vantage": "IEF"}  # Using IEF ETF as proxy
+    "S&P 500": {"yahoo": "^GSPC", "alpha_vantage": "SPY", "name": "S&P 500"},
+    "NASDAQ": {"yahoo": "^IXIC", "alpha_vantage": "QQQ", "name": "NASDAQ"},
+    "Dow Jones": {"yahoo": "^DJI", "alpha_vantage": "DIA", "name": "Dow Jones"},
+    "ASX 200": {"yahoo": "^AXJO", "alpha_vantage": "EWA", "name": "ASX 200"},  # Using iShares MSCI Australia ETF as proxy
+    "Gold": {"yahoo": "GC=F", "alpha_vantage": "GLD", "name": "Gold"},  # Using GLD ETF as proxy
+    "US 10-Yr Bond Yield": {"yahoo": "^TNX", "alpha_vantage": "IEF", "name": "US 10-Yr Bond Yield"}  # Using IEF ETF as proxy
 }
 
 # Cache configuration
@@ -538,13 +538,8 @@ def fetch_fear_and_greed_index():
         print(f"Error fetching Fear & Greed Index: {str(e)}")
         return "⚠ Error fetching Fear & Greed Index"
 
-@retry_on_rate_limit(max_retries=3, delay=5)
-def generate_market_graph(symbol, market_name):
-    """Generate a graph with fallback options."""
-    symbol_info = next((info for info in MARKETS.values() if info['yahoo'] == symbol), None)
-    if not symbol_info:
-        return None
-        
+def generate_market_graph(symbol_info, market_name):
+    """Generate a graph using the same data source as market data."""
     data = fetch_market_data_with_fallback(symbol_info)
     if data is None or data.empty:
         logger.error(f"⚠ No data available for {market_name}.")
@@ -604,9 +599,6 @@ def generate_market_graph(symbol, market_name):
     graph_path = f"{market_name.lower().replace(' ', '_')}_chart.png"
     plt.savefig(graph_path)
     plt.close()
-    
-    # Save graph path to cache
-    save_to_cache(graph_path, symbol, 'graph')
     return graph_path
 
 def send_telegram_message(message):
@@ -819,10 +811,10 @@ if __name__ == "__main__":
     for chunk in sentiment_chunks:
         send_telegram_message(f"📰 *News Overview*\n{chunk}")
     
-    # Generate and send graphs for S&P 500, NASDAQ, and ASX 200
+    # Generate and send graphs for all markets
     logger.info("Generating and sending market graphs...")
-    for symbol, name in [(info['yahoo'], name) for name, info in MARKETS.items() if 'yahoo' in info]:
-        graph_path = generate_market_graph(symbol, name)
+    for name, symbol_info in MARKETS.items():
+        graph_path = generate_market_graph(symbol_info, name)
         if graph_path:
             send_telegram_photo(graph_path)
             logger.info(f"Sent graph for {name}")
