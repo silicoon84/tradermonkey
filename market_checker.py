@@ -14,6 +14,8 @@ import wbgapi as wb
 import time
 from functools import wraps
 from yfinance.exceptions import YFRateLimitError
+import pickle
+from pathlib import Path
 
 # Set up logging
 logging.basicConfig(
@@ -34,7 +36,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
-FRED_API_KEY = os.getenv("FRED_API_KEY")  # Add this to your .env file
+FRED_API_KEY = os.getenv("FRED_API_KEY")
+ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")  # Add this to your .env file
 
 # OpenAI Client
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -42,19 +45,59 @@ client = openai.OpenAI(api_key=OPENAI_API_KEY)
 # Initialize FRED API client
 fred = Fred(api_key=FRED_API_KEY)
 
-# Market Symbols
-SP500_SYMBOL = "^GSPC"
-NASDAQ_SYMBOL = "^IXIC"
-ASX200_SYMBOL = "^AXJO"
-GOLD_SYMBOL = "GC=F"
+# Market Symbols with Alpha Vantage symbols
 MARKETS = {
-    "S&P 500": SP500_SYMBOL,
-    "NASDAQ": NASDAQ_SYMBOL,
-    "Dow Jones": "^DJI",
-    "ASX 200": ASX200_SYMBOL,
-    "Gold": "GC=F",
-    "US 10-Yr Bond Yield": "^TNX"
+    "S&P 500": {"yahoo": "^GSPC", "alpha_vantage": "SPY"},
+    "NASDAQ": {"yahoo": "^IXIC", "alpha_vantage": "QQQ"},
+    "Dow Jones": {"yahoo": "^DJI", "alpha_vantage": "DIA"},
+    "ASX 200": {"yahoo": "^AXJO", "alpha_vantage": "EWA"},  # Using iShares MSCI Australia ETF as proxy
+    "Gold": {"yahoo": "GC=F", "alpha_vantage": "GLD"},  # Using GLD ETF as proxy
+    "US 10-Yr Bond Yield": {"yahoo": "^TNX", "alpha_vantage": "IEF"}  # Using IEF ETF as proxy
 }
+
+# Cache configuration
+CACHE_DIR = Path('cache')
+CACHE_EXPIRY = timedelta(minutes=15)  # Cache data for 15 minutes
+
+def ensure_cache_dir():
+    """Ensure cache directory exists."""
+    CACHE_DIR.mkdir(exist_ok=True)
+
+def get_cache_path(symbol: str, data_type: str) -> Path:
+    """Get the cache file path for a symbol and data type."""
+    return CACHE_DIR / f"{symbol}_{data_type}.pkl"
+
+def save_to_cache(data, symbol: str, data_type: str):
+    """Save data to cache."""
+    ensure_cache_dir()
+    cache_path = get_cache_path(symbol, data_type)
+    cache_data = {
+        'timestamp': datetime.now(),
+        'data': data
+    }
+    with open(cache_path, 'wb') as f:
+        pickle.dump(cache_data, f)
+
+def load_from_cache(symbol: str, data_type: str):
+    """Load data from cache if it exists and is not expired."""
+    cache_path = get_cache_path(symbol, data_type)
+    if not cache_path.exists():
+        return None
+    
+    try:
+        with open(cache_path, 'rb') as f:
+            cache_data = pickle.load(f)
+        
+        # Check if cache is expired
+        if datetime.now() - cache_data['timestamp'] > CACHE_EXPIRY:
+            logger.info(f"Cache expired for {symbol} {data_type}")
+            return None
+        
+        logger.info(f"Using cached data for {symbol} {data_type}")
+        return cache_data['data']
+    except Exception as e:
+        logger.error(f"Error loading cache for {symbol} {data_type}: {str(e)}")
+        return None
 
 def retry_on_rate_limit(max_retries=3, delay=5):
     """Decorator to retry functions on rate limit errors."""
@@ -195,8 +238,8 @@ def save_market_memory(market_data, sentiment, key_takeaways):
         
         # Generate market history data
         market_history = {}
-        for name, symbol in MARKETS.items():
-            history = fetch_market_history(symbol)
+        for name, symbol_info in MARKETS.items():
+            history = fetch_market_history(symbol_info['yahoo'])
             if history:
                 market_history[name] = history
         
@@ -217,33 +260,149 @@ def save_market_memory(market_data, sentiment, key_takeaways):
     except Exception as e:
         logger.error(f"Error saving market memory: {str(e)}")
 
+def fetch_alpha_vantage_data(symbol, function="TIME_SERIES_DAILY"):
+    """Fetch market data from Alpha Vantage."""
+    try:
+        url = f"https://www.alphavantage.co/query"
+        params = {
+            "function": function,
+            "symbol": symbol,
+            "apikey": ALPHA_VANTAGE_API_KEY,
+            "outputsize": "full"
+        }
+        
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        if "Error Message" in data:
+            logger.error(f"Alpha Vantage API error: {data['Error Message']}")
+            return None
+            
+        if "Note" in data and "API call frequency" in data["Note"]:
+            logger.warning("Alpha Vantage API rate limit reached")
+            return None
+            
+        # Convert to pandas DataFrame
+        if function == "TIME_SERIES_DAILY":
+            time_series = data.get("Time Series (Daily)")
+            if not time_series:
+                return None
+                
+            df = pd.DataFrame.from_dict(time_series, orient='index')
+            df.index = pd.to_datetime(df.index)
+            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            df = df.astype(float)
+            return df
+            
+    except Exception as e:
+        logger.error(f"Error fetching Alpha Vantage data: {str(e)}")
+        return None
+
+def fetch_market_data_with_fallback(symbol_info):
+    """Fetch market data with fallback from Alpha Vantage to Yahoo Finance."""
+    # Try Alpha Vantage first
+    if ALPHA_VANTAGE_API_KEY:
+        logger.info(f"Attempting to fetch data from Alpha Vantage for {symbol_info['alpha_vantage']}")
+        data = fetch_alpha_vantage_data(symbol_info['alpha_vantage'])
+        if data is not None:
+            logger.info(f"Successfully fetched data from Alpha Vantage for {symbol_info['alpha_vantage']}")
+            return data
+    
+    # Fallback to Yahoo Finance
+    logger.info(f"Falling back to Yahoo Finance for {symbol_info['yahoo']}")
+    try:
+        ticker = yf.Ticker(symbol_info['yahoo'])
+        data = ticker.history(period="200d")
+        if not data.empty:
+            logger.info(f"Successfully fetched data from Yahoo Finance for {symbol_info['yahoo']}")
+            return data
+    except Exception as e:
+        logger.error(f"Error fetching Yahoo Finance data: {str(e)}")
+    
+    return None
+
+@retry_on_rate_limit(max_retries=3, delay=5)
+def fetch_market_data():
+    """Fetch market data with fallback options."""
+    market_summary = ""
+    
+    # Add Fear & Greed Index at the top
+    fear_greed = fetch_fear_and_greed_index()
+    market_summary += f"*Market Sentiment:*\n{fear_greed}\n\n"
+    
+    for name, symbol_info in MARKETS.items():
+        try:
+            data = fetch_market_data_with_fallback(symbol_info)
+            if data is not None and not data.empty:
+                latest_close = data["Close"].iloc[-1]
+                ma50 = data["Close"].rolling(window=50).mean().iloc[-1]
+                ma100 = data["Close"].rolling(window=100).mean().iloc[-1]
+                ma125 = data["Close"].rolling(window=125).mean().iloc[-1]
+                
+                # Calculate 100-day high/low percentages
+                hundred_day_high = data["High"].max()
+                hundred_day_low = data["Low"].min()
+                down_from_high = ((hundred_day_high - latest_close) / hundred_day_high) * 100
+                up_from_low = ((latest_close - hundred_day_low) / hundred_day_low) * 100
+                
+                ma50_signal = "🟢" if latest_close > ma50 else "🔴"
+                ma100_signal = "🟢" if latest_close > ma100 else "🔴"
+                ma125_signal = "🟢" if latest_close > ma125 else "🔴"
+                macd_signal = calculate_macd(data)
+                rsi_signal = calculate_rsi(data)
+                trend_emoji = "🟢" if latest_close > ma50 else "🔴"
+                trend_status = (
+                    "📈 Strong Uptrend (Above MA50, MA100, MA125)" if latest_close > ma50 > ma100 > ma125 else
+                    "📉 Bearish Trend (Below MA50, MA100, MA125)" if latest_close < ma50 < ma100 < ma125 else
+                    "⚪ Mixed Signals (Market Unclear)"
+                )
+                
+                market_summary += (
+                    f"• *{name}:* {trend_emoji} {trend_status}\n"
+                    f"  - {ma50_signal} MA50 | {ma100_signal} MA100 | {ma125_signal} MA125\n"
+                    f"  - {rsi_signal} | {macd_signal}\n"
+                    f"  - 📉 Down {down_from_high:.1f}% from 100d high | 📈 Up {up_from_low:.1f}% from 100d low\n\n"
+                )
+            else:
+                market_summary += f"• *{name}:* ⚠ No Data\n\n"
+            
+            # Add a small delay between requests
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"Error processing {name}: {str(e)}")
+            market_summary += f"• *{name}:* ⚠ Error: {str(e)}\n\n"
+            continue
+            
+    return market_summary.strip()
+
 @retry_on_rate_limit(max_retries=3, delay=5)
 def fetch_market_history(symbol, days=50):
-    """Fetch historical price data for a market."""
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period=f"{days}d")
-        if not hist.empty:
-            # Calculate daily returns
-            hist['Daily_Return'] = hist['Close'].pct_change() * 100
-            # Calculate key metrics
-            total_return = ((hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100).round(2)
-            avg_daily_return = hist['Daily_Return'].mean().round(2)
-            volatility = hist['Daily_Return'].std().round(2)
-            positive_days = (hist['Daily_Return'] > 0).sum()
-            negative_days = (hist['Daily_Return'] < 0).sum()
-            
-            return {
-                'total_return': total_return,
-                'avg_daily_return': avg_daily_return,
-                'volatility': volatility,
-                'positive_days': int(positive_days),
-                'negative_days': int(negative_days),
-                'current_price': hist['Close'].iloc[-1].round(2),
-                'start_price': hist['Close'].iloc[0].round(2)
-            }
-    except Exception as e:
-        logger.error(f"Error fetching history for {symbol}: {str(e)}")
+    """Fetch historical price data with fallback options."""
+    symbol_info = next((info for info in MARKETS.values() if info['yahoo'] == symbol), None)
+    if not symbol_info:
+        return None
+        
+    data = fetch_market_data_with_fallback(symbol_info)
+    if data is not None and not data.empty:
+        # Calculate daily returns
+        data['Daily_Return'] = data['Close'].pct_change() * 100
+        # Calculate key metrics
+        total_return = ((data['Close'].iloc[-1] / data['Close'].iloc[0] - 1) * 100).round(2)
+        avg_daily_return = data['Daily_Return'].mean().round(2)
+        volatility = data['Daily_Return'].std().round(2)
+        positive_days = (data['Daily_Return'] > 0).sum()
+        negative_days = (data['Daily_Return'] < 0).sum()
+        
+        return {
+            'total_return': total_return,
+            'avg_daily_return': avg_daily_return,
+            'volatility': volatility,
+            'positive_days': int(positive_days),
+            'negative_days': int(negative_days),
+            'current_price': data['Close'].iloc[-1].round(2),
+            'start_price': data['Close'].iloc[0].round(2)
+        }
     return None
 
 def generate_market_history_summary():
@@ -265,8 +424,8 @@ def generate_market_history_summary():
             history_summary += f"- Up/Down Days: {history['positive_days']}/{history['negative_days']}\n"
     else:
         # If no memory data, fetch fresh data
-        for name, symbol in MARKETS.items():
-            history = fetch_market_history(symbol)
+        for name, symbol_info in MARKETS.items():
+            history = fetch_market_history(symbol_info['yahoo'])
             if history:
                 history_summary += f"\n{name}:\n"
                 history_summary += f"- Price Movement: {history['start_price']} → {history['current_price']} ({history['total_return']}%)\n"
@@ -375,80 +534,30 @@ def fetch_fear_and_greed_index():
         return "⚠ Error fetching Fear & Greed Index"
 
 @retry_on_rate_limit(max_retries=3, delay=5)
-def fetch_market_data():
-    """Fetch market data with 50/100/125-day MAs, RSI, and MACD."""
-    market_summary = ""
-    
-    # Add Fear & Greed Index at the top
-    fear_greed = fetch_fear_and_greed_index()
-    market_summary += f"*Market Sentiment:*\n{fear_greed}\n\n"
-    
-    for name, symbol in MARKETS.items():
-        try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="200d")
-            if not hist.empty:
-                latest_close = hist["Close"].iloc[-1]
-                ma50 = hist["Close"].rolling(window=50).mean().iloc[-1]
-                ma100 = hist["Close"].rolling(window=100).mean().iloc[-1]
-                ma125 = hist["Close"].rolling(window=125).mean().iloc[-1]
-                
-                # Calculate 100-day high/low percentages
-                hundred_day_high = hist["High"].max()
-                hundred_day_low = hist["Low"].min()
-                down_from_high = ((hundred_day_high - latest_close) / hundred_day_high) * 100
-                up_from_low = ((latest_close - hundred_day_low) / hundred_day_low) * 100
-                
-                ma50_signal = "🟢" if latest_close > ma50 else "🔴"
-                ma100_signal = "🟢" if latest_close > ma100 else "🔴"
-                ma125_signal = "🟢" if latest_close > ma125 else "🔴"
-                macd_signal = calculate_macd(hist)
-                rsi_signal = calculate_rsi(hist)
-                trend_emoji = "🟢" if latest_close > ma50 else "🔴"
-                trend_status = (
-                    "📈 Strong Uptrend (Above MA50, MA100, MA125)" if latest_close > ma50 > ma100 > ma125 else
-                    "📉 Bearish Trend (Below MA50, MA100, MA125)" if latest_close < ma50 < ma100 < ma125 else
-                    "⚪ Mixed Signals (Market Unclear)"
-                )
-                market_summary += (
-                    f"• *{name}:* {trend_emoji} {trend_status}\n"
-                    f"  - {ma50_signal} MA50 | {ma100_signal} MA100 | {ma125_signal} MA125\n"
-                    f"  - {rsi_signal} | {macd_signal}\n"
-                    f"  - 📉 Down {down_from_high:.1f}% from 100d high | 📈 Up {up_from_low:.1f}% from 100d low\n\n"
-                )
-            else:
-                market_summary += f"• *{name}:* ⚠ No Data\n\n"
-            # Add a small delay between requests to avoid rate limiting
-            time.sleep(1)
-        except Exception as e:
-            logger.error(f"Error processing {name}: {str(e)}")
-            market_summary += f"• *{name}:* ⚠ Error: {str(e)}\n\n"
-            continue
-            
-    return market_summary.strip()
-
-@retry_on_rate_limit(max_retries=3, delay=5)
 def generate_market_graph(symbol, market_name):
-    """Generate a graph of the last 150 days with MA overlays, MACD, and RSI subplots."""
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="150d")
-    if hist.empty:
+    """Generate a graph with fallback options."""
+    symbol_info = next((info for info in MARKETS.values() if info['yahoo'] == symbol), None)
+    if not symbol_info:
+        return None
+        
+    data = fetch_market_data_with_fallback(symbol_info)
+    if data is None or data.empty:
         logger.error(f"⚠ No data available for {market_name}.")
         return None
 
     # Compute moving averages
-    hist["MA50"] = hist["Close"].rolling(window=50).mean()
-    hist["MA100"] = hist["Close"].rolling(window=100).mean()
-    hist["MA125"] = hist["Close"].rolling(window=125).mean()
+    data["MA50"] = data["Close"].rolling(window=50).mean()
+    data["MA100"] = data["Close"].rolling(window=100).mean()
+    data["MA125"] = data["Close"].rolling(window=125).mean()
 
     # Calculate MACD and Signal line
-    short_ema = hist["Close"].ewm(span=12, adjust=False).mean()
-    long_ema = hist["Close"].ewm(span=26, adjust=False).mean()
+    short_ema = data["Close"].ewm(span=12, adjust=False).mean()
+    long_ema = data["Close"].ewm(span=26, adjust=False).mean()
     macd_line = short_ema - long_ema
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
 
     # Calculate RSI
-    delta = hist["Close"].diff()
+    delta = data["Close"].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
@@ -459,25 +568,25 @@ def generate_market_graph(symbol, market_name):
                                        gridspec_kw={'height_ratios': [3, 1, 1]})
     
     # Top plot: Price and MAs
-    ax1.plot(hist.index, hist["Close"], label=f"{market_name} Price", color="black", linewidth=2)
-    ax1.plot(hist.index, hist["MA50"], label="50-Day MA", color="blue", linestyle="dashed")
-    ax1.plot(hist.index, hist["MA100"], label="100-Day MA", color="green", linestyle="dashed")
-    ax1.plot(hist.index, hist["MA125"], label="125-Day MA", color="red", linestyle="dashed")
+    ax1.plot(data.index, data["Close"], label=f"{market_name} Price", color="black", linewidth=2)
+    ax1.plot(data.index, data["MA50"], label="50-Day MA", color="blue", linestyle="dashed")
+    ax1.plot(data.index, data["MA100"], label="100-Day MA", color="green", linestyle="dashed")
+    ax1.plot(data.index, data["MA125"], label="125-Day MA", color="red", linestyle="dashed")
     ax1.set_title(f"{market_name} - Last 125 Days with MAs")
     ax1.set_ylabel("Price")
     ax1.legend()
     ax1.grid(True)
 
     # Middle plot: MACD
-    ax2.plot(hist.index, macd_line, label="MACD", color="magenta", linewidth=2)
-    ax2.plot(hist.index, signal_line, label="Signal", color="orange", linestyle="dashed")
+    ax2.plot(data.index, macd_line, label="MACD", color="magenta", linewidth=2)
+    ax2.plot(data.index, signal_line, label="Signal", color="orange", linestyle="dashed")
     ax2.set_title("MACD")
     ax2.set_ylabel("Value")
     ax2.legend()
     ax2.grid(True)
 
     # Bottom plot: RSI
-    ax3.plot(hist.index, rsi, label="RSI", color="purple", linewidth=2)
+    ax3.plot(data.index, rsi, label="RSI", color="purple", linewidth=2)
     ax3.axhline(y=70, color='r', linestyle='--', alpha=0.5)
     ax3.axhline(y=30, color='g', linestyle='--', alpha=0.5)
     ax3.set_title("RSI")
@@ -490,6 +599,9 @@ def generate_market_graph(symbol, market_name):
     graph_path = f"{market_name.lower().replace(' ', '_')}_chart.png"
     plt.savefig(graph_path)
     plt.close()
+    
+    # Save graph path to cache
+    save_to_cache(graph_path, symbol, 'graph')
     return graph_path
 
 def send_telegram_message(message):
@@ -652,8 +764,21 @@ def fetch_leading_indicators():
         logger.error(f"Error fetching leading indicators: {str(e)}")
         return None
 
+def clear_cache():
+    """Clear all cached data."""
+    if CACHE_DIR.exists():
+        for cache_file in CACHE_DIR.glob('*.pkl'):
+            try:
+                cache_file.unlink()
+                logger.info(f"Cleared cache file: {cache_file}")
+            except Exception as e:
+                logger.error(f"Error clearing cache file {cache_file}: {str(e)}")
+
 if __name__ == "__main__":
     logger.info("Starting market analysis...")
+    
+    # Clear cache at the start of each run
+    clear_cache()
     
     # Fetch market data and sentiment
     logger.info("Fetching market data...")
@@ -691,7 +816,7 @@ if __name__ == "__main__":
     
     # Generate and send graphs for S&P 500, NASDAQ, and ASX 200
     logger.info("Generating and sending market graphs...")
-    for symbol, name in [(SP500_SYMBOL, "S&P 500"), (NASDAQ_SYMBOL, "NASDAQ"), (ASX200_SYMBOL, "ASX 200"), (GOLD_SYMBOL, "Gold")]:
+    for symbol, name in [(info['yahoo'], name) for name, info in MARKETS.items() if 'yahoo' in info]:
         graph_path = generate_market_graph(symbol, name)
         if graph_path:
             send_telegram_photo(graph_path)
