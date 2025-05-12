@@ -268,7 +268,7 @@ def fetch_alpha_vantage_data(symbol, function="TIME_SERIES_DAILY"):
             "function": function,
             "symbol": symbol,
             "apikey": ALPHA_VANTAGE_API_KEY,
-            "outputsize": "full"
+            "outputsize": "compact"  # Changed from "full" to "compact" for last 100 data points
         }
         
         response = requests.get(url, params=params)
@@ -293,6 +293,11 @@ def fetch_alpha_vantage_data(symbol, function="TIME_SERIES_DAILY"):
             df.index = pd.to_datetime(df.index)
             df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
             df = df.astype(float)
+            
+            # Sort by date and get last 125 days
+            df = df.sort_index()
+            df = df.tail(125)
+            
             return df
             
     except Exception as e:
@@ -313,7 +318,7 @@ def fetch_market_data_with_fallback(symbol_info):
     logger.info(f"Falling back to Yahoo Finance for {symbol_info['yahoo']}")
     try:
         ticker = yf.Ticker(symbol_info['yahoo'])
-        data = ticker.history(period="200d")
+        data = ticker.history(period="125d")  # Changed from 200d to 125d to match
         if not data.empty:
             logger.info(f"Successfully fetched data from Yahoo Finance for {symbol_info['yahoo']}")
             return data
