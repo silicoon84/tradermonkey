@@ -11,6 +11,9 @@ import logging
 import pandas as pd
 from fredapi import Fred
 import wbgapi as wb
+import time
+from functools import wraps
+from yfinance.exceptions import YFRateLimitError
 
 # Set up logging
 logging.basicConfig(
@@ -52,6 +55,26 @@ MARKETS = {
     "Gold": "GC=F",
     "US 10-Yr Bond Yield": "^TNX"
 }
+
+def retry_on_rate_limit(max_retries=3, delay=5):
+    """Decorator to retry functions on rate limit errors."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            retries = 0
+            while retries < max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except YFRateLimitError:
+                    retries += 1
+                    if retries == max_retries:
+                        logger.error(f"Max retries ({max_retries}) reached for {func.__name__}")
+                        raise
+                    logger.warning(f"Rate limit hit, retrying in {delay} seconds... (Attempt {retries}/{max_retries})")
+                    time.sleep(delay)
+            return None
+        return wrapper
+    return decorator
 
 def calculate_macd(data):
     """Calculate MACD (Trend Momentum)."""
@@ -194,6 +217,7 @@ def save_market_memory(market_data, sentiment, key_takeaways):
     except Exception as e:
         logger.error(f"Error saving market memory: {str(e)}")
 
+@retry_on_rate_limit(max_retries=3, delay=5)
 def fetch_market_history(symbol, days=50):
     """Fetch historical price data for a market."""
     try:
@@ -219,7 +243,7 @@ def fetch_market_history(symbol, days=50):
                 'start_price': hist['Close'].iloc[0].round(2)
             }
     except Exception as e:
-        print(f"Error fetching history for {symbol}: {str(e)}")
+        logger.error(f"Error fetching history for {symbol}: {str(e)}")
     return None
 
 def generate_market_history_summary():
@@ -350,6 +374,7 @@ def fetch_fear_and_greed_index():
         print(f"Error fetching Fear & Greed Index: {str(e)}")
         return "⚠ Error fetching Fear & Greed Index"
 
+@retry_on_rate_limit(max_retries=3, delay=5)
 def fetch_market_data():
     """Fetch market data with 50/100/125-day MAs, RSI, and MACD."""
     market_summary = ""
@@ -359,47 +384,56 @@ def fetch_market_data():
     market_summary += f"*Market Sentiment:*\n{fear_greed}\n\n"
     
     for name, symbol in MARKETS.items():
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="200d")
-        if not hist.empty:
-            latest_close = hist["Close"].iloc[-1]
-            ma50 = hist["Close"].rolling(window=50).mean().iloc[-1]
-            ma100 = hist["Close"].rolling(window=100).mean().iloc[-1]
-            ma125 = hist["Close"].rolling(window=125).mean().iloc[-1]
+        try:
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(period="200d")
+            if not hist.empty:
+                latest_close = hist["Close"].iloc[-1]
+                ma50 = hist["Close"].rolling(window=50).mean().iloc[-1]
+                ma100 = hist["Close"].rolling(window=100).mean().iloc[-1]
+                ma125 = hist["Close"].rolling(window=125).mean().iloc[-1]
+                
+                # Calculate 100-day high/low percentages
+                hundred_day_high = hist["High"].max()
+                hundred_day_low = hist["Low"].min()
+                down_from_high = ((hundred_day_high - latest_close) / hundred_day_high) * 100
+                up_from_low = ((latest_close - hundred_day_low) / hundred_day_low) * 100
+                
+                ma50_signal = "🟢" if latest_close > ma50 else "🔴"
+                ma100_signal = "🟢" if latest_close > ma100 else "🔴"
+                ma125_signal = "🟢" if latest_close > ma125 else "🔴"
+                macd_signal = calculate_macd(hist)
+                rsi_signal = calculate_rsi(hist)
+                trend_emoji = "🟢" if latest_close > ma50 else "🔴"
+                trend_status = (
+                    "📈 Strong Uptrend (Above MA50, MA100, MA125)" if latest_close > ma50 > ma100 > ma125 else
+                    "📉 Bearish Trend (Below MA50, MA100, MA125)" if latest_close < ma50 < ma100 < ma125 else
+                    "⚪ Mixed Signals (Market Unclear)"
+                )
+                market_summary += (
+                    f"• *{name}:* {trend_emoji} {trend_status}\n"
+                    f"  - {ma50_signal} MA50 | {ma100_signal} MA100 | {ma125_signal} MA125\n"
+                    f"  - {rsi_signal} | {macd_signal}\n"
+                    f"  - 📉 Down {down_from_high:.1f}% from 100d high | 📈 Up {up_from_low:.1f}% from 100d low\n\n"
+                )
+            else:
+                market_summary += f"• *{name}:* ⚠ No Data\n\n"
+            # Add a small delay between requests to avoid rate limiting
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"Error processing {name}: {str(e)}")
+            market_summary += f"• *{name}:* ⚠ Error: {str(e)}\n\n"
+            continue
             
-            # Calculate 100-day high/low percentages
-            hundred_day_high = hist["High"].max()
-            hundred_day_low = hist["Low"].min()
-            down_from_high = ((hundred_day_high - latest_close) / hundred_day_high) * 100
-            up_from_low = ((latest_close - hundred_day_low) / hundred_day_low) * 100
-            
-            ma50_signal = "🟢" if latest_close > ma50 else "🔴"
-            ma100_signal = "🟢" if latest_close > ma100 else "🔴"
-            ma125_signal = "🟢" if latest_close > ma125 else "🔴"
-            macd_signal = calculate_macd(hist)
-            rsi_signal = calculate_rsi(hist)
-            trend_emoji = "🟢" if latest_close > ma50 else "🔴"
-            trend_status = (
-                "📈 Strong Uptrend (Above MA50, MA100, MA125)" if latest_close > ma50 > ma100 > ma125 else
-                "📉 Bearish Trend (Below MA50, MA100, MA125)" if latest_close < ma50 < ma100 < ma125 else
-                "⚪ Mixed Signals (Market Unclear)"
-            )
-            market_summary += (
-                f"• *{name}:* {trend_emoji} {trend_status}\n"
-                f"  - {ma50_signal} MA50 | {ma100_signal} MA100 | {ma125_signal} MA125\n"
-                f"  - {rsi_signal} | {macd_signal}\n"
-                f"  - 📉 Down {down_from_high:.1f}% from 100d high | 📈 Up {up_from_low:.1f}% from 100d low\n\n"
-            )
-        else:
-            market_summary += f"• *{name}:* ⚠ No Data\n\n"
     return market_summary.strip()
 
+@retry_on_rate_limit(max_retries=3, delay=5)
 def generate_market_graph(symbol, market_name):
     """Generate a graph of the last 150 days with MA overlays, MACD, and RSI subplots."""
     ticker = yf.Ticker(symbol)
     hist = ticker.history(period="150d")
     if hist.empty:
-        print(f"⚠ No data available for {market_name}.")
+        logger.error(f"⚠ No data available for {market_name}.")
         return None
 
     # Compute moving averages
