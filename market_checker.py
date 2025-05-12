@@ -37,7 +37,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 FRED_API_KEY = os.getenv("FRED_API_KEY")
-ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")  # Add this to your .env file
+ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
+ALPHA_VANTAGE_API_KEY2 = os.getenv("ALPHA_VANTAGE_API_KEY2")  # Add second API key
 
 # OpenAI Client
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -260,33 +261,65 @@ def save_market_memory(market_data, sentiment, key_takeaways):
     except Exception as e:
         logger.error(f"Error saving market memory: {str(e)}")
 
-def fetch_alpha_vantage_data(symbol, function="TIME_SERIES_DAILY"):
-    """Fetch market data from Alpha Vantage."""
+def fetch_alpha_vantage_data(symbol, function="TIME_SERIES_DAILY", api_key=None):
+    """Fetch market data from Alpha Vantage using a specific API key."""
     try:
+        # Use provided API key or default to first key
+        current_api_key = api_key or ALPHA_VANTAGE_API_KEY
+        
+        # Log API key status
+        if not current_api_key:
+            logger.error("Alpha Vantage API key is not set")
+            return None
+        logger.info(f"Using Alpha Vantage API key: {current_api_key[:4]}...{current_api_key[-4:]}")
+
         url = f"https://www.alphavantage.co/query"
         params = {
             "function": function,
             "symbol": symbol,
-            "apikey": ALPHA_VANTAGE_API_KEY,
-            "outputsize": "compact"  # Changed from "full" to "compact" for last 100 data points
+            "apikey": current_api_key,
+            "outputsize": "compact"
         }
         
+        # Log the request URL (without API key)
+        safe_params = params.copy()
+        safe_params['apikey'] = 'REDACTED'
+        logger.info(f"Making Alpha Vantage API request for {symbol} with params: {safe_params}")
+        
         response = requests.get(url, params=params)
+        
+        # Log response status and headers
+        logger.info(f"Alpha Vantage API response status: {response.status_code}")
+        logger.info(f"Alpha Vantage API response headers: {dict(response.headers)}")
+        
+        # Check for HTTP errors
         response.raise_for_status()
+        
         data = response.json()
         
+        # Log the raw response for debugging
+        logger.info(f"Alpha Vantage API raw response keys: {list(data.keys())}")
+        
+        # Check for specific API error messages
         if "Error Message" in data:
-            logger.error(f"Alpha Vantage API error: {data['Error Message']}")
+            logger.error(f"Alpha Vantage API error for {symbol}: {data['Error Message']}")
             return None
             
-        if "Note" in data and "API call frequency" in data["Note"]:
-            logger.warning("Alpha Vantage API rate limit reached")
-            return None
-            
-        # Convert to pandas DataFrame
+        if "Note" in data:
+            logger.warning(f"Alpha Vantage API note for {symbol}: {data['Note']}")
+            if "API call frequency" in data["Note"]:
+                logger.error("Alpha Vantage API rate limit reached")
+                return None
+            if "Invalid API call" in data["Note"]:
+                logger.error("Alpha Vantage API key may be invalid")
+                return None
+                
+        # Check for empty or invalid data
         if function == "TIME_SERIES_DAILY":
             time_series = data.get("Time Series (Daily)")
             if not time_series:
+                logger.error(f"Alpha Vantage API returned no time series data for {symbol}")
+                logger.error(f"Full response: {data}")
                 return None
                 
             df = pd.DataFrame.from_dict(time_series, orient='index')
@@ -294,31 +327,50 @@ def fetch_alpha_vantage_data(symbol, function="TIME_SERIES_DAILY"):
             df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
             df = df.astype(float)
             
+            # Log data summary
+            logger.info(f"Successfully fetched {len(df)} days of data for {symbol}")
+            logger.info(f"Date range: {df.index.min()} to {df.index.max()}")
+            
             # Sort by date and get last 125 days
             df = df.sort_index()
             df = df.tail(125)
             
             return df
             
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error fetching Alpha Vantage data for {symbol}: {str(e)}")
+        return None
+    except ValueError as e:
+        logger.error(f"Data parsing error for {symbol}: {str(e)}")
+        return None
     except Exception as e:
-        logger.error(f"Error fetching Alpha Vantage data: {str(e)}")
+        logger.error(f"Unexpected error fetching Alpha Vantage data for {symbol}: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
         return None
 
 def fetch_market_data_with_fallback(symbol_info):
-    """Fetch market data with fallback from Alpha Vantage to Yahoo Finance."""
-    # Try Alpha Vantage first
+    """Fetch market data with fallback from Alpha Vantage (primary key) to Alpha Vantage (secondary key) to Yahoo Finance."""
+    # Try first Alpha Vantage API key
     if ALPHA_VANTAGE_API_KEY:
-        logger.info(f"Attempting to fetch data from Alpha Vantage for {symbol_info['alpha_vantage']}")
-        data = fetch_alpha_vantage_data(symbol_info['alpha_vantage'])
+        logger.info(f"Attempting to fetch data from Alpha Vantage (primary key) for {symbol_info['alpha_vantage']}")
+        data = fetch_alpha_vantage_data(symbol_info['alpha_vantage'], api_key=ALPHA_VANTAGE_API_KEY)
         if data is not None:
-            logger.info(f"Successfully fetched data from Alpha Vantage for {symbol_info['alpha_vantage']}")
+            logger.info(f"Successfully fetched data from Alpha Vantage (primary key) for {symbol_info['alpha_vantage']}")
+            return data
+    
+    # Try second Alpha Vantage API key
+    if ALPHA_VANTAGE_API_KEY2:
+        logger.info(f"Attempting to fetch data from Alpha Vantage (secondary key) for {symbol_info['alpha_vantage']}")
+        data = fetch_alpha_vantage_data(symbol_info['alpha_vantage'], api_key=ALPHA_VANTAGE_API_KEY2)
+        if data is not None:
+            logger.info(f"Successfully fetched data from Alpha Vantage (secondary key) for {symbol_info['alpha_vantage']}")
             return data
     
     # Fallback to Yahoo Finance
     logger.info(f"Falling back to Yahoo Finance for {symbol_info['yahoo']}")
     try:
         ticker = yf.Ticker(symbol_info['yahoo'])
-        data = ticker.history(period="125d")  # Changed from 200d to 125d to match
+        data = ticker.history(period="125d")
         if not data.empty:
             logger.info(f"Successfully fetched data from Yahoo Finance for {symbol_info['yahoo']}")
             return data
